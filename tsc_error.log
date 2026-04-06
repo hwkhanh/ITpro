@@ -1,0 +1,1 @@
+src/app/nft/[id]/page.tsx(317,260): error TS2304: Cannot find name 'TrendingDown'.
