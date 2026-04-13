@@ -43,7 +43,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
     let aiResult;
     try {
-      const aiResponse = await axios.post('https://nft-ai-service-uvku.onrender.com', aiFormData, {
+      const aiResponse = await axios.post('https://nft-ai-service-uvku.onrender.com/predict', aiFormData, {
         headers: {
           ...aiFormData.getHeaders(),
         },
