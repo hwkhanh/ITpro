@@ -4,7 +4,7 @@ import React, { useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/Button';
-import { CheckCircle2, ChevronRight, Lock, Wallet } from 'lucide-react';
+import { CheckCircle2, ChevronRight, Lock, Wallet, ExternalLink, Loader2 } from 'lucide-react';
 import { useMarket, NFT } from '@/context/MarketContext';
 
 function CheckoutContent() {
@@ -30,14 +30,28 @@ function CheckoutContent() {
   const gas = checkoutItems.length > 0 ? 0.005 : 0;
   const total = checkoutItems.length > 0 ? subtotal + fee + gas : 0;
 
-  const handleConfirm = () => {
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [txHash, setTxHash] = useState('');
+
+  const handleConfirm = async () => {
     if (!isLoggedIn) {
       login();
       return;
     }
     if (checkoutItems.length === 0) return;
-    processPurchase(checkoutItems);
-    router.push('/profile');
+    
+    setIsProcessing(true);
+    try {
+      const hash = await processPurchase(checkoutItems);
+      setTxHash(hash);
+      setIsSuccess(true);
+    } catch (error: any) {
+      console.error(error);
+      alert(`Transaction failed: ${error.message || 'Check console'}`);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   if (checkoutItems.length === 0) {
@@ -99,14 +113,14 @@ function CheckoutContent() {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={`${item.image}?auto=format&fit=crop&q=80&w=400`} alt={item.title} className="w-full h-full object-cover" />
                   </div>
-                  <div className="flex-1 flex flex-col items-center sm:items-start text-center sm:text-left">
-                    <h3 className="font-serif text-xl font-bold text-ivory">{item.title}</h3>
-                    <p className="text-sm text-ivory/60 mt-1 mb-3">By {item.creator}</p>
-                    <div className="text-xs bg-navy px-3 py-1 rounded-full border border-indigo-muted text-ivory/80">ERC-721 Token</div>
+                  <div className="flex-1 flex flex-col items-center sm:items-start text-center sm:text-left min-w-0">
+                    <h3 className="font-serif text-xl font-bold text-ivory truncate w-full">{item.title}</h3>
+                    <p className="text-sm text-ivory/60 mt-1 mb-3 truncate w-full">By {item.creator}</p>
+                    <div className="text-xs bg-navy px-3 py-1 rounded-full border border-indigo-muted text-ivory/80 inline-block w-fit">ERC-721 Token</div>
                   </div>
-                  <div className="flex flex-col items-center sm:items-end mt-4 sm:mt-0">
-                    <span className="text-xs text-ivory/50 uppercase tracking-widest mb-1">Fixed Price</span>
-                    <span className="font-sans font-bold text-xl text-gold drop-shadow-[0_0_8px_rgba(247,208,2,0.4)]">{item.price} ETH</span>
+                  <div className="flex flex-col items-center sm:items-end mt-4 sm:mt-0 flex-shrink-0 sm:ml-4">
+                    <span className="text-xs text-ivory/50 uppercase tracking-widest mb-1 whitespace-nowrap">Fixed Price</span>
+                    <span className="font-sans font-bold text-xl text-gold drop-shadow-[0_0_8px_rgba(247,208,2,0.4)] whitespace-nowrap">{item.price} ETH</span>
                   </div>
                 </div>
               ))}
@@ -174,8 +188,8 @@ function CheckoutContent() {
                   <Wallet className="mr-2 h-5 w-5" /> Connect to Confirm
                 </Button>
               ) : (
-                <Button variant="default" onClick={handleConfirm} className="w-full rounded-xl py-6 text-lg font-bold">
-                  Confirm Purchase
+                <Button variant="default" onClick={handleConfirm} disabled={isProcessing} className="w-full rounded-xl py-6 text-lg font-bold">
+                  {isProcessing ? <><Loader2 className="mr-2 h-5 w-5 animate-spin"/> Processing...</> : 'Confirm Purchase'}
                 </Button>
               )}
               <div className="flex items-center justify-center gap-2 text-xs text-ivory/50">
@@ -186,6 +200,45 @@ function CheckoutContent() {
           </div>
         </div>
       </div>
+
+      {/* Success Modal */}
+      {isSuccess && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-[#0c1b33]/80 backdrop-blur-sm animate-in fade-in duration-500">
+          <div className="bg-[#0c1b33] border border-gold/30 shadow-[0_0_30px_rgba(247,208,2,0.15)] rounded-3xl p-8 max-w-md w-full text-center relative animate-in zoom-in-95 duration-500">
+            <div className="mx-auto w-24 h-24 bg-green-500/10 border border-green-500/30 rounded-full flex items-center justify-center mb-6 shadow-[0_0_15px_rgba(74,222,128,0.2)]">
+              <CheckCircle2 className="h-12 w-12 text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.5)]" />
+            </div>
+            
+            <h2 className="font-serif text-3xl font-bold text-ivory mb-2">Transaction Successful!</h2>
+            <p className="text-ivory/70 mb-8">Your purchase has been securely recorded on the blockchain.</p>
+            
+            <div className="bg-navy-light/40 border border-indigo-muted/30 rounded-xl p-4 mb-8">
+              <p className="text-xs text-ivory/50 uppercase tracking-widest mb-2 font-semibold">Transaction Hash</p>
+              {txHash ? (
+                <a 
+                  href={`https://sepolia.etherscan.io/tx/${txHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 font-mono text-gold hover:text-gold-light hover:underline transition-colors text-lg"
+                >
+                  {txHash.substring(0,6)}...{txHash.substring(txHash.length-4)} <ExternalLink className="w-5 h-5" />
+                </a>
+              ) : (
+                <span className="font-mono text-ivory/50">TxHash not available</span>
+              )}
+            </div>
+            
+            <Button 
+              variant="default" 
+              size="lg" 
+              onClick={() => router.push('/profile')} 
+              className="w-full rounded-xl py-6 text-lg font-bold shadow-glow-gold"
+            >
+              View My Collection
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

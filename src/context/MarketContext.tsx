@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { ethers } from 'ethers';
-import { collection, doc, getDoc, setDoc, onSnapshot, writeBatch, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, setDoc, onSnapshot, writeBatch, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 // --- TYPES ---
@@ -10,6 +10,7 @@ export type NFTStatus = 'available' | 'sold' | 'owned';
 
 export interface NFT {
   id: string;
+  tokenId?: number;
   title: string;
   creator: string;
   ownerId: string;
@@ -54,7 +55,7 @@ export interface MarketContextType {
   ownedNFTs: NFT[];
   purchaseHistory: PurchaseHistoryItem[];
   
-  processPurchase: (items: NFT[]) => Promise<void>;
+  processPurchase: (items: NFT[]) => Promise<string>;
   listNFT: (nftId: string, newPrice: number) => Promise<void>;
   cancelListing: (nftId: string) => Promise<void>;
   getNFTById: (id: string) => NFT | undefined;
@@ -187,34 +188,95 @@ export function MarketProvider({ children }: { children: React.ReactNode }) {
     return nfts.find(n => n.id === id);
   };
 
-  const processPurchase = async (items: NFT[]) => {
-    if (!isLoggedIn || !walletAddress) return; 
+  const processPurchase = async (items: NFT[]): Promise<string> => {
+    if (!isLoggedIn || !walletAddress) throw new Error("User not connected"); 
     
     try {
-      const batch = writeBatch(db);
+      const totalPrice = items.reduce((acc, item) => acc + item.price, 0);
+      const fee = totalPrice * 0.015;
+      const gasEstimate = items.length > 0 ? 0.005 : 0;
+      const finalAmount = totalPrice + fee + gasEstimate;
       
-      items.forEach(item => {
-        // 1. Update NFT Document
-        const nftRef = doc(db, 'nfts', item.id);
-        batch.update(nftRef, {
-          status: 'owned',
-          ownerId: walletAddress
-        });
-        
-        // 2. Add Transaction Record
-        const txRef = doc(collection(db, 'transactions'));
-        batch.set(txRef, {
-          nftId: item.id,
-          title: item.title,
-          creator: item.creator,
-          image: item.image,
-          price: item.price,
-          date: new Date().toISOString(),
-          txHash: `0xMOCK_HASH_${Math.random().toString(16).substring(2, 10)}`, // In production, replace with real txHash
-          buyerId: walletAddress,
-          sellerId: item.ownerId || 'System'
-        });
-      });
+      if (typeof window.ethereum === 'undefined') {
+        throw new Error("MetaMask is not installed. Please install it to use this feature.");
+      }
+
+      await window.ethereum.request({ method: "eth_requestAccounts" });
+      const provider = new ethers.BrowserProvider(window.ethereum as any);
+      const signer = await provider.getSigner();
+
+      const network = await provider.getNetwork();
+      if (Number(network.chainId) !== 11155111) {
+        throw new Error("Wrong network! Please switch MetaMask to Sepolia Testnet.");
+      }
+      
+      const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || "0x93A7463146f50e58F5cfA28Da72B5A7de7B49386";
+      
+      const extendedABI = [
+         "function buyNFT(uint256 tokenId) public payable",
+         "function ownerOf(uint256 tokenId) public view returns (address)"
+      ];
+      const nftContract = new ethers.Contract(CONTRACT_ADDRESS, extendedABI, signer);
+      
+      let lastTxHash = "";
+      const batch = writeBatch(db);
+
+      for (const item of items) {
+          if (item.tokenId === undefined || item.tokenId === null) {
+              throw new Error(`NFT "${item.title}" is missing an on-chain tokenId. It cannot be purchased natively.`);
+          }
+          
+          // Verify Current Ownership on-chain
+          const currentOwner = await nftContract.ownerOf(item.tokenId);
+          if (currentOwner.toLowerCase() === walletAddress.toLowerCase()) {
+              throw new Error(`You already own NFT: ${item.title}`);
+          }
+          
+          const priceInWei = ethers.parseEther(item.price.toString());
+          
+          // Execute Atomic Purchase via Smart Contract!
+          const tx = await nftContract.buyNFT(item.tokenId, { value: priceInWei });
+          const receipt = await tx.wait();
+          
+          lastTxHash = receipt?.hash || tx.hash;
+          if (!lastTxHash) throw new Error("Transaction hash was not generated.");
+          
+          // Verify New Ownership on-chain
+          const newOwner = await nftContract.ownerOf(item.tokenId);
+          if (newOwner.toLowerCase() !== walletAddress.toLowerCase()) {
+              throw new Error(`Ownership transfer verification failed for NFT: ${item.title}`);
+          }
+          
+          // Validate uniqueness against DB records
+          const q = query(collection(db, 'transactions'), where('txHash', '==', lastTxHash));
+          const duplicateSnap = await getDocs(q);
+          if (!duplicateSnap.empty) {
+             throw new Error("This transaction was already recorded (Duplicate TxHash).");
+          }
+          
+          // 1. Update NFT Document
+          const nftRef = doc(db, 'nfts', item.id);
+          batch.update(nftRef, {
+            status: 'owned',
+            ownerId: walletAddress,
+            txHash: lastTxHash
+          });
+          
+          // 2. Add Transaction Record
+          const txRef = doc(collection(db, 'transactions'));
+          batch.set(txRef, {
+            nftId: item.id,
+            tokenId: item.tokenId,
+            title: item.title,
+            creator: item.creator,
+            image: item.image,
+            price: item.price,
+            date: new Date().toISOString(),
+            txHash: lastTxHash,
+            buyerId: walletAddress,
+            sellerId: item.ownerId || currentOwner
+          });
+      }
       
       await batch.commit();
       
@@ -222,9 +284,10 @@ export function MarketProvider({ children }: { children: React.ReactNode }) {
       const purchasedIds = items.map(i => i.id);
       setCartItems(cartItems.filter(item => !purchasedIds.includes(item.id)));
       
+      return lastTxHash;
     } catch (error) {
       console.error("Purchase Error:", error);
-      alert('Failed to process purchase on the database.');
+      throw error; // Let UI handle error
     }
   };
 

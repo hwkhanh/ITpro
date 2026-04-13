@@ -1,19 +1,21 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { Upload, Image as ImageIcon, CheckCircle2, ShieldCheck, Loader2, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { ethers } from 'ethers';
 import NFT_ABI from '@/lib/NFT_ABI.json';
 import { useMarket } from '@/context/MarketContext';
-import { collection, doc, setDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { supabase } from '@/lib/supabase';
 
-const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || "0x336c028DC08aC4FE8424c6F8dFA91b57cd987283";
+const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || "0x93A7463146f50e58F5cfA28Da72B5A7de7B49386";
 
 export default function CreateNFTPage() {
+  const router = useRouter();
   const { isLoggedIn, login, walletAddress, nfts } = useMarket();
   const [fileState, setFileState] = useState<'idle' | 'uploading' | 'scanning' | 'safe' | 'minting' | 'success' | 'error' | 'risk'>('idle');
   const [scanProgress, setScanProgress] = useState(0);
@@ -150,20 +152,79 @@ export default function CreateNFTPage() {
 
       // 3. Mint on Smart Contract
       setMintStatus("Step 3/3: Awaiting wallet confirmation to mint...");
-      const nftContract = new ethers.Contract(CONTRACT_ADDRESS, NFT_ABI, signer);
       
-      const tx = await nftContract.mint(metadataURI, { gasLimit: 500000 });
+      const code = await provider.getCode(CONTRACT_ADDRESS);
+      if (code === "0x" || code === "") {
+          throw new Error(`CRITICAL ERROR: ${CONTRACT_ADDRESS} is NOT a smart contract! It has no bytecode. You likely copied your own wallet address or the wrong address from Remix instead of the Deployed Contract Address.`);
+      }
+
+      // Extend ABI to support the new Atomic Purchase Contract
+      const extendedABI = [
+         ...NFT_ABI,
+         "function mintWithPrice(string uri, uint256 price) public returns (uint256)"
+      ];
+      const nftContract = new ethers.Contract(CONTRACT_ADDRESS, extendedABI, signer);
+      
+      const priceInWei = ethers.parseEther(price || "0.01");
+      const tx = await nftContract.mintWithPrice(metadataURI, priceInWei, { gasLimit: 500000 });
       
       setMintStatus("Blockchain transaction submitted. Waiting for confirmation...");
-      setTxHash(tx.hash);
+      
+      const receipt = await tx.wait();
+      
+      if (receipt && receipt.status === 0) {
+          throw new Error("Transaction was REVERTED by the blockchain (Status 0). EVM dropped the execution.");
+      }
+      
+      const realTxHash = receipt?.hash || tx.hash;
+      setTxHash(realTxHash);
+      if (!realTxHash) throw new Error("Transaction hash was not generated.");
 
-      await tx.wait();
+      // Extract the tokenId robustly looking at all possible representations
+      let mintedTokenId = null;
+      for (const log of receipt.logs) {
+         // Ethers v6 parsed EventLog check
+         if ((log as any).eventName === 'Transfer' && (log as any).args) {
+            mintedTokenId = Number((log as any).args[2]);
+            break;
+         }
+         
+         // Interface exact parsing
+         try {
+            const parsedLog = nftContract.interface.parseLog({ topics: log.topics.slice(), data: log.data });
+            if (parsedLog && parsedLog.name === 'Transfer') {
+                mintedTokenId = Number(parsedLog.args[2]);
+                break;
+            }
+         } catch(e) {}
+         
+         // Transfer(address,address,uint256) raw signature hash fallback
+         const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+         if (log.topics && log.topics.length >= 4 && typeof log.topics[0] === 'string' && log.topics[0].toLowerCase() === TRANSFER_TOPIC) {
+            mintedTokenId = Number(BigInt(log.topics[3]));
+            break;
+         }
+      }
+      
+      if (mintedTokenId === null || isNaN(mintedTokenId)) {
+          const serializedLogs = JSON.stringify(receipt.logs, (key, value) => typeof value === 'bigint' ? value.toString() : value);
+          console.error("Failed logs:", serializedLogs);
+          throw new Error(`Could not map blockchain Token ID. receipt.logs.length = ${receipt.logs.length}. Logs dump: ${serializedLogs.substring(0, 200)}...`);
+      }
+
+      // Validate uniqueness against DB records
+      const q = query(collection(db, 'transactions'), where('txHash', '==', realTxHash));
+      const duplicateSnap = await getDocs(q);
+      if (!duplicateSnap.empty) {
+         throw new Error("This transaction was already recorded (Duplicate TxHash).");
+      }
 
       setMintStatus("Syncing to Marketplace Database...");
       
       const newDocRef = doc(collection(db, 'nfts'));
       await setDoc(newDocRef, {
         id: newDocRef.id,
+        tokenId: mintedTokenId, // Store the Smart Contract Token ID
         title: title || "Untitled Masterpiece",
         description: description || "Minted securely via AuraArt Platform",
         image: publicUrl,
@@ -173,7 +234,22 @@ export default function CreateNFTPage() {
         status: 'available',
         collection: finalCollection || 'AuraArt Originals',
         createdAt: new Date().toISOString(),
-        txHash: tx.hash,
+        txHash: realTxHash,
+      });
+
+      // Record in universal transaction history
+      const txRef = doc(collection(db, 'transactions'));
+      await setDoc(txRef, {
+        nftId: newDocRef.id,
+        tokenId: mintedTokenId,
+        title: title || "Untitled Masterpiece",
+        creator: walletAddress,
+        image: publicUrl,
+        price: Number(price) || 0.01,
+        date: new Date().toISOString(),
+        txHash: realTxHash,
+        buyerId: walletAddress,
+        sellerId: 'System Minter'
       });
 
       setMintStatus("Successfully minted and synced your Masterpiece!");
@@ -276,17 +352,7 @@ export default function CreateNFTPage() {
               {fileState === 'success' && (
                 <div className="flex flex-col items-center text-center px-6 relative z-10 w-full">
                   <CheckCircle2 className="h-16 w-16 text-green-400 mb-4 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]" />
-                  <p className="font-bold text-green-400 text-xl mb-2">Minted Out!</p>
-                  {txHash && (
-                    <a 
-                      href={`https://sepolia.etherscan.io/tx/${txHash}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 text-[11px] font-mono text-center bg-green-950/40 text-green-400/90 px-4 py-2 rounded-full border border-green-500/30 hover:bg-green-900/60 transition-colors pointer-events-auto"
-                    >
-                      {txHash.substring(0,6)}...{txHash.substring(txHash.length-4)} <ExternalLink className="w-3 h-3" />
-                    </a>
-                  )}
+                  <p className="font-bold text-green-400 text-xl mb-2">Minted Successfully!</p>
                 </div>
               )}
 
@@ -417,6 +483,45 @@ export default function CreateNFTPage() {
           
         </div>
       </div>
+
+      {/* Success Modal */}
+      {fileState === 'success' && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-[#0c1b33]/80 backdrop-blur-sm animate-in fade-in duration-500">
+          <div className="bg-[#0c1b33] border border-gold/30 shadow-[0_0_30px_rgba(247,208,2,0.15)] rounded-3xl p-8 max-w-md w-full text-center relative animate-in zoom-in-95 duration-500">
+            <div className="mx-auto w-24 h-24 bg-green-500/10 border border-green-500/30 rounded-full flex items-center justify-center mb-6 shadow-[0_0_15px_rgba(74,222,128,0.2)]">
+              <CheckCircle2 className="h-12 w-12 text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.5)]" />
+            </div>
+            
+            <h2 className="font-serif text-3xl font-bold text-ivory mb-2">Mint Successful!</h2>
+            <p className="text-ivory/70 mb-8">Your masterpiece has been securely minted to the blockchain.</p>
+            
+            <div className="bg-navy-light/40 border border-indigo-muted/30 rounded-xl p-4 mb-8">
+              <p className="text-xs text-ivory/50 uppercase tracking-widest mb-2 font-semibold">Transaction Hash</p>
+              {txHash ? (
+                <a 
+                  href={`https://sepolia.etherscan.io/tx/${txHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 font-mono text-gold hover:text-gold-light hover:underline transition-colors text-lg"
+                >
+                  {txHash.substring(0,6)}...{txHash.substring(txHash.length-4)} <ExternalLink className="w-5 h-5" />
+                </a>
+              ) : (
+                <span className="font-mono text-ivory/50">TxHash not available</span>
+              )}
+            </div>
+            
+            <Button 
+              variant="default" 
+              size="lg" 
+              onClick={() => router.push('/')} 
+              className="w-full rounded-xl py-6 text-lg font-bold shadow-glow-gold"
+            >
+              Back to Home
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
