@@ -58,8 +58,14 @@ export default function CreateNFTPage() {
       }, 500);
 
       try {
+        if (!file) {
+          setMintStatus("No file selected!");
+          setFileState('error');
+          return;
+        }
+
         const formData = new FormData();
-        formData.append('file', selectedFile);
+        formData.append('file', file);
 
         const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/upload`, {
           method: 'POST',
