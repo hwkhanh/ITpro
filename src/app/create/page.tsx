@@ -61,7 +61,7 @@ export default function CreateNFTPage() {
         const formData = new FormData();
         formData.append('file', selectedFile);
 
-        const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/scan`, {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/upload`, {
           method: 'POST',
           body: formData,
         });
