@@ -61,7 +61,7 @@ export default function CreateNFTPage() {
         const formData = new FormData();
         formData.append('file', selectedFile);
 
-        const response = await fetch('${process.env.NEXT_PUBLIC_BACKEND_URL}/api/scan', {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/scan`, {
           method: 'POST',
           body: formData,
         });
@@ -297,11 +297,11 @@ export default function CreateNFTPage() {
             <h3 className="font-serif text-xl font-bold text-ivory">Artwork File</h3>
 
             <div className={`relative flex flex-col items-center justify-center w-full aspect-[4/5] overflow-hidden rounded-2xl border-2 border-dashed transition-all duration-300 ${fileState === 'idle' ? 'border-indigo-muted bg-navy-light/30 hover:bg-navy hover:border-gold/50 cursor-pointer shadow-sm' :
-                fileState === 'uploading' ? 'border-gold bg-gold/5 shadow-glow-gold' :
-                  fileState === 'scanning' ? 'border-indigo-muted bg-navy-light/50' :
-                    fileState === 'minting' ? 'border-blue-400 bg-blue-900/20 shadow-[0_0_15px_rgba(96,165,250,0.2)] pointer-events-none' :
-                      fileState === 'error' ? 'border-red-500 bg-red-950/20 shadow-[0_0_15px_rgba(239,68,68,0.2)]' :
-                        'border-green-400 bg-green-500/10 shadow-[0_0_15px_rgba(74,222,128,0.2)]'
+              fileState === 'uploading' ? 'border-gold bg-gold/5 shadow-glow-gold' :
+                fileState === 'scanning' ? 'border-indigo-muted bg-navy-light/50' :
+                  fileState === 'minting' ? 'border-blue-400 bg-blue-900/20 shadow-[0_0_15px_rgba(96,165,250,0.2)] pointer-events-none' :
+                    fileState === 'error' ? 'border-red-500 bg-red-950/20 shadow-[0_0_15px_rgba(239,68,68,0.2)]' :
+                      'border-green-400 bg-green-500/10 shadow-[0_0_15px_rgba(74,222,128,0.2)]'
               }`}>
               {fileState === 'idle' && (
                 <>
@@ -368,8 +368,8 @@ export default function CreateNFTPage() {
               {(fileState !== 'idle' && preview) && (
                 <div className="absolute inset-0 p-2 z-0 pointer-events-none">
                   <div className={`w-full h-full bg-cover bg-center rounded-xl transition-all duration-1000 ${fileState === 'safe' || fileState === 'success' ? 'opacity-40 mix-blend-screen' :
-                      fileState === 'minting' ? 'opacity-20 mix-blend-screen' :
-                        'opacity-10 grayscale'
+                    fileState === 'minting' ? 'opacity-20 mix-blend-screen' :
+                      'opacity-10 grayscale'
                     }`} style={{ backgroundImage: `url(${preview})` }} />
                 </div>
               )}
@@ -463,9 +463,9 @@ export default function CreateNFTPage() {
                 size="lg"
                 onClick={handleMint}
                 className={`w-full text-lg py-6 rounded-xl transition-all ${fileState === 'safe' ? 'shadow-glow-gold' :
-                    fileState === 'minting' ? 'opacity-90 cursor-wait bg-blue-600 border-blue-500 shadow-[0_0_15px_rgba(37,99,235,0.4)] text-white' :
-                      fileState === 'success' ? 'border-green-500 text-green-400 bg-green-950/20 shadow-[0_0_15px_rgba(74,222,128,0.2)]' :
-                        'border-indigo-muted bg-navy-light/20 text-ivory/50 opacity-70 cursor-not-allowed'
+                  fileState === 'minting' ? 'opacity-90 cursor-wait bg-blue-600 border-blue-500 shadow-[0_0_15px_rgba(37,99,235,0.4)] text-white' :
+                    fileState === 'success' ? 'border-green-500 text-green-400 bg-green-950/20 shadow-[0_0_15px_rgba(74,222,128,0.2)]' :
+                      'border-indigo-muted bg-navy-light/20 text-ivory/50 opacity-70 cursor-not-allowed'
                   }`}
                 disabled={fileState !== 'safe'}
               >
