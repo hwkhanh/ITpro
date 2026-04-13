@@ -43,29 +43,32 @@ export default function CreateNFTPage() {
     return collections as string[];
   }, [nfts, walletAddress]);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const selectedFile = e.target.files[0];
-      setFile(selectedFile);
-      setPreview(URL.createObjectURL(selectedFile));
+      setFile(e.target.files[0]);
+      setPreview(URL.createObjectURL(e.target.files[0]));
+      console.log("File selected:", e.target.files[0]);
+    }
+  };
+
+  useEffect(() => {
+    const uploadFile = async () => {
+      if (!file) {
+        setMintStatus("No file selected!");
+        setFileState('error');
+        return;
+      }
 
       setFileState('scanning');
       setScanProgress(0);
 
-      // UI visual progress
       const progressInterval = setInterval(() => {
         setScanProgress(prev => (prev >= 90 ? 90 : prev + 10));
       }, 500);
 
       try {
-        if (!selectedFile) {
-          setMintStatus("No file selected!");
-          setFileState('error');
-          return;
-        }
-
         const formData = new FormData();
-        formData.append('file', selectedFile);
+        formData.append('file', file);
 
         const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/upload`, {
           method: 'POST',
@@ -76,7 +79,8 @@ export default function CreateNFTPage() {
         setScanProgress(100);
 
         if (!response.ok) {
-          throw new Error('AI Server is not reachable or returned an error.');
+          const errorData = await response.json();
+          throw new Error(errorData.error || errorData.message || 'AI Server is not reachable or returned an error.');
         }
 
         const data = await response.json();
@@ -93,8 +97,12 @@ export default function CreateNFTPage() {
         setFileState('error');
         setMintStatus(`AI Scan Error: ${err.message || 'Cannot reach server'}`);
       }
+    };
+
+    if (file && fileState === 'idle') {
+      uploadFile();
     }
-  };
+  }, [file, fileState]);
 
   const resetForm = () => {
     setFile(null);
@@ -311,7 +319,7 @@ export default function CreateNFTPage() {
               }`}>
               {fileState === 'idle' && (
                 <>
-                  <input type="file" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" onChange={handleFileUpload} accept="image/*" />
+                  <input type="file" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" onChange={handleFileChange} accept="image/*" />
                   <Upload className="h-10 w-10 text-gold mb-4 drop-shadow-[0_0_5px_rgba(247,208,2,0.4)]" />
                   <p className="text-sm font-medium text-ivory">Click or drag and drop</p>
                   <p className="text-xs text-ivory/50 mt-2 text-center px-4">PNG, JPG, GIF up to 50MB</p>
