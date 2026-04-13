@@ -78,24 +78,31 @@ export default function CreateNFTPage() {
         clearInterval(progressInterval);
         setScanProgress(100);
 
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || errorData.message || 'AI Server is not reachable or returned an error.');
+        let data;
+        try {
+          data = await response.json();
+        } catch (parseError) {
+          throw new Error('AI Server is not reachable or returned an unparsable response.');
         }
 
-        const data = await response.json();
-
-        if (data.label === 'stego') {
+        if (!response.ok || data.success === false) {
           setFileState('error');
-          setMintStatus(`Security Alert: Hidden data anomalies detected! (Confidence: ${(data.probability_stego * 100).toFixed(1)}%). Action Blocked.`);
-        } else {
-          setFileState('safe');
+          setMintStatus(data.message || data.error || 'Server rejected the file.');
+          return;
         }
+
+        // Proceed normally if success is true
+        setFileState('safe');
 
       } catch (err: any) {
         clearInterval(progressInterval);
         setFileState('error');
-        setMintStatus(`AI Scan Error: ${err.message || 'Cannot reach server'}`);
+        // Network errors (like CORS or server dead) throw TypeError 'Failed to fetch'
+        if (err.name === 'TypeError' && err.message.includes('fetch')) {
+          setMintStatus('AI Server is not reachable (Network Error).');
+        } else {
+          setMintStatus(err.message || 'AI Server is not reachable.');
+        }
       }
     };
 

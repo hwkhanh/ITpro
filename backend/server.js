@@ -63,7 +63,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     if (aiResult.prediction === 'STEGO' || aiResult.label === 'stego') {
       return res.status(400).json({
         success: false,
-        message: 'AI Security Audit Failed: This image contains steganography (hidden data) and is not allowed to be minted.',
+        message: 'Security Alert: This image contains steganography (hidden data). Minting is blocked to protect the platform.',
         ai: {
           prediction: aiResult.prediction,
           confidence: aiResult.confidence,
