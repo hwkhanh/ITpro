@@ -19,7 +19,7 @@ export default function CreateNFTPage() {
   const { isLoggedIn, login, walletAddress, nfts } = useMarket();
   const [fileState, setFileState] = useState<'idle' | 'uploading' | 'scanning' | 'safe' | 'minting' | 'success' | 'error' | 'risk'>('idle');
   const [scanProgress, setScanProgress] = useState(0);
-  
+
   // File and Meta States
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -48,7 +48,7 @@ export default function CreateNFTPage() {
       const selectedFile = e.target.files[0];
       setFile(selectedFile);
       setPreview(URL.createObjectURL(selectedFile));
-      
+
       setFileState('scanning');
       setScanProgress(0);
 
@@ -61,7 +61,7 @@ export default function CreateNFTPage() {
         const formData = new FormData();
         formData.append('file', selectedFile);
 
-        const response = await fetch('http://localhost:8000/predict', {
+        const response = await fetch('${process.env.NEXT_PUBLIC_BACKEND_URL}/api/scan', {
           method: 'POST',
           body: formData,
         });
@@ -76,10 +76,10 @@ export default function CreateNFTPage() {
         const data = await response.json();
 
         if (data.label === 'stego') {
-           setFileState('error');
-           setMintStatus(`Security Alert: Hidden data anomalies detected! (Confidence: ${(data.probability_stego * 100).toFixed(1)}%). Action Blocked.`);
+          setFileState('error');
+          setMintStatus(`Security Alert: Hidden data anomalies detected! (Confidence: ${(data.probability_stego * 100).toFixed(1)}%). Action Blocked.`);
         } else {
-           setFileState('safe');
+          setFileState('safe');
         }
 
       } catch (err: any) {
@@ -105,7 +105,7 @@ export default function CreateNFTPage() {
         setFileState('error');
         return;
       }
-      
+
       if (typeof window.ethereum === 'undefined') {
         setMintStatus("Error: MetaMask is not installed! Please install it.");
         setFileState('error');
@@ -152,30 +152,30 @@ export default function CreateNFTPage() {
 
       // 3. Mint on Smart Contract
       setMintStatus("Step 3/3: Awaiting wallet confirmation to mint...");
-      
+
       const code = await provider.getCode(CONTRACT_ADDRESS);
       if (code === "0x" || code === "") {
-          throw new Error(`CRITICAL ERROR: ${CONTRACT_ADDRESS} is NOT a smart contract! It has no bytecode. You likely copied your own wallet address or the wrong address from Remix instead of the Deployed Contract Address.`);
+        throw new Error(`CRITICAL ERROR: ${CONTRACT_ADDRESS} is NOT a smart contract! It has no bytecode. You likely copied your own wallet address or the wrong address from Remix instead of the Deployed Contract Address.`);
       }
 
       // Extend ABI to support the new Atomic Purchase Contract
       const extendedABI = [
-         ...NFT_ABI,
-         "function mintWithPrice(string uri, uint256 price) public returns (uint256)"
+        ...NFT_ABI,
+        "function mintWithPrice(string uri, uint256 price) public returns (uint256)"
       ];
       const nftContract = new ethers.Contract(CONTRACT_ADDRESS, extendedABI, signer);
-      
+
       const priceInWei = ethers.parseEther(price || "0.01");
       const tx = await nftContract.mintWithPrice(metadataURI, priceInWei, { gasLimit: 500000 });
-      
+
       setMintStatus("Blockchain transaction submitted. Waiting for confirmation...");
-      
+
       const receipt = await tx.wait();
-      
+
       if (receipt && receipt.status === 0) {
-          throw new Error("Transaction was REVERTED by the blockchain (Status 0). EVM dropped the execution.");
+        throw new Error("Transaction was REVERTED by the blockchain (Status 0). EVM dropped the execution.");
       }
-      
+
       const realTxHash = receipt?.hash || tx.hash;
       setTxHash(realTxHash);
       if (!realTxHash) throw new Error("Transaction hash was not generated.");
@@ -183,44 +183,44 @@ export default function CreateNFTPage() {
       // Extract the tokenId robustly looking at all possible representations
       let mintedTokenId = null;
       for (const log of receipt.logs) {
-         // Ethers v6 parsed EventLog check
-         if ((log as any).eventName === 'Transfer' && (log as any).args) {
-            mintedTokenId = Number((log as any).args[2]);
+        // Ethers v6 parsed EventLog check
+        if ((log as any).eventName === 'Transfer' && (log as any).args) {
+          mintedTokenId = Number((log as any).args[2]);
+          break;
+        }
+
+        // Interface exact parsing
+        try {
+          const parsedLog = nftContract.interface.parseLog({ topics: log.topics.slice(), data: log.data });
+          if (parsedLog && parsedLog.name === 'Transfer') {
+            mintedTokenId = Number(parsedLog.args[2]);
             break;
-         }
-         
-         // Interface exact parsing
-         try {
-            const parsedLog = nftContract.interface.parseLog({ topics: log.topics.slice(), data: log.data });
-            if (parsedLog && parsedLog.name === 'Transfer') {
-                mintedTokenId = Number(parsedLog.args[2]);
-                break;
-            }
-         } catch(e) {}
-         
-         // Transfer(address,address,uint256) raw signature hash fallback
-         const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
-         if (log.topics && log.topics.length >= 4 && typeof log.topics[0] === 'string' && log.topics[0].toLowerCase() === TRANSFER_TOPIC) {
-            mintedTokenId = Number(BigInt(log.topics[3]));
-            break;
-         }
+          }
+        } catch (e) { }
+
+        // Transfer(address,address,uint256) raw signature hash fallback
+        const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+        if (log.topics && log.topics.length >= 4 && typeof log.topics[0] === 'string' && log.topics[0].toLowerCase() === TRANSFER_TOPIC) {
+          mintedTokenId = Number(BigInt(log.topics[3]));
+          break;
+        }
       }
-      
+
       if (mintedTokenId === null || isNaN(mintedTokenId)) {
-          const serializedLogs = JSON.stringify(receipt.logs, (key, value) => typeof value === 'bigint' ? value.toString() : value);
-          console.error("Failed logs:", serializedLogs);
-          throw new Error(`Could not map blockchain Token ID. receipt.logs.length = ${receipt.logs.length}. Logs dump: ${serializedLogs.substring(0, 200)}...`);
+        const serializedLogs = JSON.stringify(receipt.logs, (key, value) => typeof value === 'bigint' ? value.toString() : value);
+        console.error("Failed logs:", serializedLogs);
+        throw new Error(`Could not map blockchain Token ID. receipt.logs.length = ${receipt.logs.length}. Logs dump: ${serializedLogs.substring(0, 200)}...`);
       }
 
       // Validate uniqueness against DB records
       const q = query(collection(db, 'transactions'), where('txHash', '==', realTxHash));
       const duplicateSnap = await getDocs(q);
       if (!duplicateSnap.empty) {
-         throw new Error("This transaction was already recorded (Duplicate TxHash).");
+        throw new Error("This transaction was already recorded (Duplicate TxHash).");
       }
 
       setMintStatus("Syncing to Marketplace Database...");
-      
+
       const newDocRef = doc(collection(db, 'nfts'));
       await setDoc(newDocRef, {
         id: newDocRef.id,
@@ -271,10 +271,10 @@ export default function CreateNFTPage() {
       <div className="container mx-auto px-4 py-32 text-center max-w-xl flex-1 mt-10">
         <h1 className="font-serif text-4xl sm:text-5xl font-bold text-gold drop-shadow-sm mb-6">Creator's Studio</h1>
         <div className="bg-[#0c1b33]/60 border border-indigo-muted/50 rounded-3xl p-10 shadow-painting backdrop-blur-md">
-           <ShieldCheck className="h-16 w-16 text-gold mb-6 mx-auto opacity-80" />
-           <h2 className="text-2xl font-bold text-ivory mb-4">Authentication Required</h2>
-           <p className="text-ivory/70 mb-8">Please connect your wallet to enter the Creator's Studio and mint your masterpieces to the blockchain.</p>
-           <Button variant="default" size="lg" onClick={login} className="rounded-xl w-full sm:w-auto px-10">Connect Web3 Wallet</Button>
+          <ShieldCheck className="h-16 w-16 text-gold mb-6 mx-auto opacity-80" />
+          <h2 className="text-2xl font-bold text-ivory mb-4">Authentication Required</h2>
+          <p className="text-ivory/70 mb-8">Please connect your wallet to enter the Creator's Studio and mint your masterpieces to the blockchain.</p>
+          <Button variant="default" size="lg" onClick={login} className="rounded-xl w-full sm:w-auto px-10">Connect Web3 Wallet</Button>
         </div>
       </div>
     );
@@ -291,19 +291,18 @@ export default function CreateNFTPage() {
 
       <div className="bg-[#0c1b33]/60 border border-indigo-muted/50 rounded-3xl p-6 sm:p-10 shadow-painting backdrop-blur-md">
         <div className="flex flex-col md:flex-row gap-10">
-          
+
           {/* Left Column - Image Upload */}
           <div className="w-full md:w-2/5 flex flex-col gap-6">
             <h3 className="font-serif text-xl font-bold text-ivory">Artwork File</h3>
-            
-            <div className={`relative flex flex-col items-center justify-center w-full aspect-[4/5] overflow-hidden rounded-2xl border-2 border-dashed transition-all duration-300 ${
-              fileState === 'idle' ? 'border-indigo-muted bg-navy-light/30 hover:bg-navy hover:border-gold/50 cursor-pointer shadow-sm' :
-              fileState === 'uploading' ? 'border-gold bg-gold/5 shadow-glow-gold' :
-              fileState === 'scanning' ? 'border-indigo-muted bg-navy-light/50' :
-              fileState === 'minting' ? 'border-blue-400 bg-blue-900/20 shadow-[0_0_15px_rgba(96,165,250,0.2)] pointer-events-none' :
-              fileState === 'error' ? 'border-red-500 bg-red-950/20 shadow-[0_0_15px_rgba(239,68,68,0.2)]' :
-              'border-green-400 bg-green-500/10 shadow-[0_0_15px_rgba(74,222,128,0.2)]'
-            }`}>
+
+            <div className={`relative flex flex-col items-center justify-center w-full aspect-[4/5] overflow-hidden rounded-2xl border-2 border-dashed transition-all duration-300 ${fileState === 'idle' ? 'border-indigo-muted bg-navy-light/30 hover:bg-navy hover:border-gold/50 cursor-pointer shadow-sm' :
+                fileState === 'uploading' ? 'border-gold bg-gold/5 shadow-glow-gold' :
+                  fileState === 'scanning' ? 'border-indigo-muted bg-navy-light/50' :
+                    fileState === 'minting' ? 'border-blue-400 bg-blue-900/20 shadow-[0_0_15px_rgba(96,165,250,0.2)] pointer-events-none' :
+                      fileState === 'error' ? 'border-red-500 bg-red-950/20 shadow-[0_0_15px_rgba(239,68,68,0.2)]' :
+                        'border-green-400 bg-green-500/10 shadow-[0_0_15px_rgba(74,222,128,0.2)]'
+              }`}>
               {fileState === 'idle' && (
                 <>
                   <input type="file" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" onChange={handleFileUpload} accept="image/*" />
@@ -312,27 +311,27 @@ export default function CreateNFTPage() {
                   <p className="text-xs text-ivory/50 mt-2 text-center px-4">PNG, JPG, GIF up to 50MB</p>
                 </>
               )}
-              
+
               {fileState === 'uploading' && (
                 <div className="flex flex-col items-center text-center px-6 relative z-10">
                   <ImageIcon className="h-12 w-12 text-gold animate-pulse mb-4" />
                   <p className="text-sm font-medium text-ivory">Receiving masterpiece...</p>
                 </div>
               )}
-              
+
               {fileState === 'scanning' && (
                 <div className="flex flex-col items-center text-center px-6 w-full relative z-10">
                   <Loader2 className="h-12 w-12 text-gold animate-spin mb-4" />
                   <p className="text-sm font-medium text-ivory mb-2">AI Scanner Running</p>
                   <p className="text-xs text-ivory/50 mb-4">Initializing Gradient Boosting model...</p>
-                  
+
                   <div className="w-full h-2 bg-navy rounded-full overflow-hidden border border-indigo-muted">
                     <div className="h-full bg-gold transition-all duration-200 shadow-glow-gold" style={{ width: `${scanProgress}%` }}></div>
                   </div>
                   <p className="text-xs font-mono text-gold mt-2 font-bold drop-shadow-sm">{scanProgress}%</p>
                 </div>
               )}
-              
+
               {fileState === 'safe' && (
                 <div className="flex flex-col items-center text-center px-6 relative z-10">
                   <ShieldCheck className="h-16 w-16 text-green-400 mb-4 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]" />
@@ -368,48 +367,47 @@ export default function CreateNFTPage() {
               {/* Uploaded Image preview behind the status */}
               {(fileState !== 'idle' && preview) && (
                 <div className="absolute inset-0 p-2 z-0 pointer-events-none">
-                  <div className={`w-full h-full bg-cover bg-center rounded-xl transition-all duration-1000 ${
-                    fileState === 'safe' || fileState === 'success' ? 'opacity-40 mix-blend-screen' : 
-                    fileState === 'minting' ? 'opacity-20 mix-blend-screen' :
-                    'opacity-10 grayscale'
-                  }`} style={{ backgroundImage: `url(${preview})` }} />
+                  <div className={`w-full h-full bg-cover bg-center rounded-xl transition-all duration-1000 ${fileState === 'safe' || fileState === 'success' ? 'opacity-40 mix-blend-screen' :
+                      fileState === 'minting' ? 'opacity-20 mix-blend-screen' :
+                        'opacity-10 grayscale'
+                    }`} style={{ backgroundImage: `url(${preview})` }} />
                 </div>
               )}
             </div>
-            
+
             {(fileState === 'safe' || fileState === 'success' || fileState === 'error') && (
               <Button variant="outline" className="w-full text-sm font-medium border-indigo-muted text-ivory hover:text-white" onClick={resetForm}>Upload New Image</Button>
             )}
           </div>
-          
+
           {/* Right Column - Form */}
           <div className="w-full md:w-3/5 flex flex-col gap-6">
             <div>
               <label className="block text-sm font-medium text-ivory mb-2">Title</label>
-              <Input 
+              <Input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. 'The Digital Vitruvian'" 
-                disabled={fileState !== 'safe' && fileState !== 'idle' && fileState !== 'error'} 
-                className="bg-navy/50 border-indigo-muted text-ivory focus:border-gold placeholder:text-ivory/30" 
+                placeholder="e.g. 'The Digital Vitruvian'"
+                disabled={fileState !== 'safe' && fileState !== 'idle' && fileState !== 'error'}
+                className="bg-navy/50 border-indigo-muted text-ivory focus:border-gold placeholder:text-ivory/30"
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-ivory mb-2">Description</label>
-              <textarea 
+              <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full rounded-xl border border-indigo-muted bg-navy/50 px-4 py-3 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold min-h-[140px] resize-y disabled:opacity-50 text-ivory placeholder:text-ivory/30 transition-colors" 
+                className="w-full rounded-xl border border-indigo-muted bg-navy/50 px-4 py-3 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold min-h-[140px] resize-y disabled:opacity-50 text-ivory placeholder:text-ivory/30 transition-colors"
                 placeholder="Describe the inspiration, medium, and meaning behind this piece..."
                 disabled={fileState !== 'safe' && fileState !== 'idle' && fileState !== 'error'}
               ></textarea>
             </div>
-            
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-ivory mb-2">Collection</label>
-                <select 
+                <select
                   value={selectedCollection}
                   onChange={(e) => setSelectedCollection(e.target.value)}
                   disabled={fileState !== 'safe' && fileState !== 'idle' && fileState !== 'error'}
@@ -428,59 +426,58 @@ export default function CreateNFTPage() {
                   )}
                   <option value="create_new">Create New +</option>
                 </select>
-                
+
                 {selectedCollection === 'create_new' && (
                   <div className="mt-3 animate-in fade-in slide-in-from-top-2">
-                    <Input 
+                    <Input
                       value={newCollectionName}
                       onChange={(e) => setNewCollectionName(e.target.value)}
-                      placeholder="Enter new collection name" 
-                      disabled={fileState !== 'safe' && fileState !== 'idle' && fileState !== 'error'} 
-                      className="bg-navy/50 border-gold/50 text-ivory focus:border-gold placeholder:text-ivory/30" 
+                      placeholder="Enter new collection name"
+                      disabled={fileState !== 'safe' && fileState !== 'idle' && fileState !== 'error'}
+                      className="bg-navy/50 border-gold/50 text-ivory focus:border-gold placeholder:text-ivory/30"
                     />
                   </div>
                 )}
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium text-ivory mb-2">Price (ETH)</label>
                 <div className="relative">
-                  <Input 
-                    type="number" 
-                    step="0.01" 
+                  <Input
+                    type="number"
+                    step="0.01"
                     value={price}
                     onChange={(e) => setPrice(e.target.value)}
-                    placeholder="0.5" 
-                    disabled={fileState !== 'safe' && fileState !== 'idle' && fileState !== 'error'} 
-                    className="bg-navy/50 border-indigo-muted text-ivory focus:border-gold placeholder:text-ivory/30 h-12 pl-4 pr-12" 
+                    placeholder="0.5"
+                    disabled={fileState !== 'safe' && fileState !== 'idle' && fileState !== 'error'}
+                    className="bg-navy/50 border-indigo-muted text-ivory focus:border-gold placeholder:text-ivory/30 h-12 pl-4 pr-12"
                   />
                   <span className="absolute right-4 top-1/2 -translate-y-1/2 font-bold text-ivory/50">ETH</span>
                 </div>
               </div>
             </div>
-            
+
             <div className="pt-8 mt-auto border-t border-indigo-muted/30">
-              <Button 
-                variant={fileState === 'safe' || fileState === 'minting' ? 'default' : 'outline'} 
-                size="lg" 
+              <Button
+                variant={fileState === 'safe' || fileState === 'minting' ? 'default' : 'outline'}
+                size="lg"
                 onClick={handleMint}
-                className={`w-full text-lg py-6 rounded-xl transition-all ${
-                  fileState === 'safe' ? 'shadow-glow-gold' : 
-                  fileState === 'minting' ? 'opacity-90 cursor-wait bg-blue-600 border-blue-500 shadow-[0_0_15px_rgba(37,99,235,0.4)] text-white' :
-                  fileState === 'success' ? 'border-green-500 text-green-400 bg-green-950/20 shadow-[0_0_15px_rgba(74,222,128,0.2)]' :
-                  'border-indigo-muted bg-navy-light/20 text-ivory/50 opacity-70 cursor-not-allowed'
-                }`}
+                className={`w-full text-lg py-6 rounded-xl transition-all ${fileState === 'safe' ? 'shadow-glow-gold' :
+                    fileState === 'minting' ? 'opacity-90 cursor-wait bg-blue-600 border-blue-500 shadow-[0_0_15px_rgba(37,99,235,0.4)] text-white' :
+                      fileState === 'success' ? 'border-green-500 text-green-400 bg-green-950/20 shadow-[0_0_15px_rgba(74,222,128,0.2)]' :
+                        'border-indigo-muted bg-navy-light/20 text-ivory/50 opacity-70 cursor-not-allowed'
+                  }`}
                 disabled={fileState !== 'safe'}
               >
                 {fileState === 'safe' ? 'Mint Masterpiece' :
-                 fileState === 'minting' ? 'Minting on SECURE Network...' :
-                 fileState === 'success' ? '✓ Masterpiece Minted' :
-                 fileState === 'error' ? 'Minting Failed - Please Retry' :
-                 'Awaiting Secure Upload'}
+                  fileState === 'minting' ? 'Minting on SECURE Network...' :
+                    fileState === 'success' ? '✓ Masterpiece Minted' :
+                      fileState === 'error' ? 'Minting Failed - Please Retry' :
+                        'Awaiting Secure Upload'}
               </Button>
             </div>
           </div>
-          
+
         </div>
       </div>
 
@@ -491,30 +488,30 @@ export default function CreateNFTPage() {
             <div className="mx-auto w-24 h-24 bg-green-500/10 border border-green-500/30 rounded-full flex items-center justify-center mb-6 shadow-[0_0_15px_rgba(74,222,128,0.2)]">
               <CheckCircle2 className="h-12 w-12 text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.5)]" />
             </div>
-            
+
             <h2 className="font-serif text-3xl font-bold text-ivory mb-2">Mint Successful!</h2>
             <p className="text-ivory/70 mb-8">Your masterpiece has been securely minted to the blockchain.</p>
-            
+
             <div className="bg-navy-light/40 border border-indigo-muted/30 rounded-xl p-4 mb-8">
               <p className="text-xs text-ivory/50 uppercase tracking-widest mb-2 font-semibold">Transaction Hash</p>
               {txHash ? (
-                <a 
+                <a
                   href={`https://sepolia.etherscan.io/tx/${txHash}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center justify-center gap-2 font-mono text-gold hover:text-gold-light hover:underline transition-colors text-lg"
                 >
-                  {txHash.substring(0,6)}...{txHash.substring(txHash.length-4)} <ExternalLink className="w-5 h-5" />
+                  {txHash.substring(0, 6)}...{txHash.substring(txHash.length - 4)} <ExternalLink className="w-5 h-5" />
                 </a>
               ) : (
                 <span className="font-mono text-ivory/50">TxHash not available</span>
               )}
             </div>
-            
-            <Button 
-              variant="default" 
-              size="lg" 
-              onClick={() => router.push('/')} 
+
+            <Button
+              variant="default"
+              size="lg"
+              onClick={() => router.push('/')}
               className="w-full rounded-xl py-6 text-lg font-bold shadow-glow-gold"
             >
               Back to Home

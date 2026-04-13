@@ -43,7 +43,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
     let aiResult;
     try {
-      const aiResponse = await axios.post('http://localhost:8000/predict', aiFormData, {
+      const aiResponse = await axios.post('https://nft-ai-service-uvku.onrender.com', aiFormData, {
         headers: {
           ...aiFormData.getHeaders(),
         },
@@ -91,7 +91,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       'https://api.pinata.cloud/pinning/pinFileToIPFS',
       formData,
       {
-        maxBodyLength: 'Infinity', 
+        maxBodyLength: 'Infinity',
         headers: {
           ...pinataHeaders,
           ...formData.getHeaders(),
@@ -123,7 +123,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
         }
       ]
     };
-    
+
     if (collection) {
       metadata.collection = collection;
     }
@@ -165,7 +165,7 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   } catch (error) {
     // Log errors to console
     console.error('Error uploading to Pinata:', error?.response?.data || error.message);
-    
+
     // Return HTTP 500 on failure
     return res.status(500).json({
       success: false,
